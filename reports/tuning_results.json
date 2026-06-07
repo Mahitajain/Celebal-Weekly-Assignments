@@ -1,0 +1,22 @@
+{
+  "best_params": {
+    "subsample": 1.0,
+    "reg_lambda": 1.5,
+    "reg_alpha": 0,
+    "min_child_weight": 3,
+    "gamma": 0,
+    "colsample_bytree": 1.0,
+    "learning_rate": 0.09000000000000001,
+    "max_depth": 4,
+    "n_estimators": 200
+  },
+  "best_cv_r2_random": 0.9971821665763855,
+  "best_cv_r2_grid": 0.9972897052764893,
+  "test_metrics": {
+    "label": "Tuned XGBoost (test)",
+    "MAE": 65.13934326171875,
+    "RMSE": 88.9370443154173,
+    "R2": 0.999416172504425,
+    "MAPE": 0.8461125195026398
+  }
+}
