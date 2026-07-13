@@ -1,0 +1,50 @@
+Retrieval-Augmented Generation (RAG) Notes
+
+What is RAG?
+Retrieval-Augmented Generation, or RAG, is a technique that combines a retrieval
+system with a language model. Instead of relying only on what the language model
+memorized during training, RAG looks up relevant information from an external
+knowledge source at query time and feeds that information to the model as context.
+This grounds the model's answers in real, verifiable data rather than the model's
+internal (and sometimes outdated or incorrect) knowledge.
+
+Why use RAG?
+Large language models can hallucinate, meaning they sometimes generate answers
+that sound plausible but are factually wrong. RAG reduces hallucination because
+the model is instructed to answer using retrieved context rather than guessing.
+RAG also allows a model to answer questions about private or domain-specific data,
+such as a company's internal documents, without retraining the model itself.
+
+How does RAG work?
+There are four main stages. First, documents are ingested and split into smaller
+chunks of text. Second, each chunk is converted into a numerical vector, called an
+embedding, using an embedding model. Third, embeddings are stored in a vector
+database that supports fast similarity search. Fourth, when a user asks a question,
+the question itself is embedded and compared against the stored chunk embeddings to
+find the most relevant chunks. Those chunks are inserted into the prompt sent to the
+language model, which then generates a final answer grounded in that context.
+
+Chunking strategies
+The size of a chunk matters. If chunks are too large, the embedding becomes a blurry
+average of many different ideas, which hurts retrieval precision. If chunks are too
+small, individual chunks may lack enough context to be useful on their own. A common
+approach is to use overlapping chunks of a few hundred words, so that information near
+a chunk boundary is not lost.
+
+Vector databases
+Vector databases such as FAISS, Pinecone, Weaviate, and Chroma are optimized for
+similarity search over high-dimensional vectors. They allow a system to search
+millions of embeddings and return the closest matches in milliseconds, which is what
+makes real-time retrieval over large document collections practical.
+
+Common use cases
+RAG is widely used in customer support chatbots that answer questions from a
+knowledge base, internal enterprise search tools, coding assistants that reference
+a codebase, and research assistants that answer questions from a set of papers.
+
+Limitations
+RAG systems are only as good as their retrieval step. If the retriever fails to find
+the relevant chunk, the language model has no way to answer correctly, even if the
+information exists somewhere in the document collection. This is why techniques like
+hybrid search (combining keyword search with vector search) and re-ranking are often
+added to improve retrieval quality.
