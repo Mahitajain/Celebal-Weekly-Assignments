@@ -1,0 +1,178 @@
+"""
+Streamlit frontend for the Hospital AI Assistant.
+
+Talks to the FastAPI backend over HTTP (`API_BASE_URL`, default
+http://localhost:8000) rather than importing the orchestrator directly --
+this keeps the UI a real client of the documented API (matching how a
+production frontend, e.g. a future React app, would integrate) instead of
+a tightly-coupled script.
+"""
+from __future__ import annotations
+
+import os
+import time
+import uuid
+
+import requests
+import streamlit as st
+
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
+
+st.set_page_config(page_title="Hospital AI Assistant", page_icon="🏥", layout="wide")
+
+# ---------------------------------------------------------------------------
+# Styling — dark-mode-aware, ChatGPT-like chat bubbles + route badges.
+# ---------------------------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    .route-badge {
+        display: inline-block; padding: 2px 10px; border-radius: 999px;
+        font-size: 0.75rem; font-weight: 600; letter-spacing: .02em;
+        margin-bottom: 6px;
+    }
+    .route-sql { background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb66; }
+    .route-rag { background: #23863633; color: #3fb950; border: 1px solid #23863666; }
+    .route-hybrid { background: #a371f733; color: #c297ff; border: 1px solid #a371f766; }
+    .route-clarify, .route-unsupported { background: #9e6a0333; color: #d29922; border: 1px solid #9e6a0366; }
+    .citation-chip {
+        display: inline-block; background: rgba(127,127,127,0.15); border-radius: 8px;
+        padding: 4px 10px; margin: 3px 4px 0 0; font-size: 0.8rem;
+    }
+    .sql-box { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.82rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# ---------------------------------------------------------------------------
+# Sidebar
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.title("🏥 Hospital AI Assistant")
+    st.caption("Multi-agent: NL→SQL over patient data + RAG over policy docs")
+
+    try:
+        health = requests.get(f"{API_BASE_URL}/health", timeout=5).json()
+        st.success("Backend connected")
+        st.metric("Admissions indexed", f"{health['admissions_row_count']:,}")
+        st.metric("Policy documents", health["documents_indexed"])
+        st.caption(f"LLM provider: **{health['llm_provider']}** ({'live' if health['llm_available'] else 'fallback mode'})")
+        st.caption(f"Embedding backend: **{health['embedding_backend']}**")
+    except Exception:
+        st.error(f"Cannot reach backend at {API_BASE_URL}")
+
+    st.divider()
+    st.subheader("Try asking")
+    examples = [
+        "How many diabetic patients are older than 60?",
+        "What is the average length of stay for cancer patients?",
+        "What is the hospital's visitor policy?",
+        "What documents are required before surgery?",
+        "List patients assigned to Dr. Smith",
+    ]
+    for ex in examples:
+        if st.button(ex, use_container_width=True):
+            st.session_state.pending_question = ex
+
+    st.divider()
+    if st.button("🗑️ Clear conversation", use_container_width=True):
+        try:
+            requests.delete(f"{API_BASE_URL}/api/v1/chat/{st.session_state.session_id}", timeout=5)
+        except Exception:
+            pass
+        st.session_state.messages = []
+        st.rerun()
+
+# ---------------------------------------------------------------------------
+# Route badge helper
+# ---------------------------------------------------------------------------
+_ROUTE_LABELS = {
+    "sql": ("🗄️ SQL Agent", "route-sql"),
+    "rag": ("📄 RAG Agent", "route-rag"),
+    "hybrid": ("🔀 SQL + RAG", "route-hybrid"),
+    "clarify": ("❓ Needs clarification", "route-clarify"),
+    "unsupported": ("🚫 Unsupported", "route-unsupported"),
+}
+
+
+def render_assistant_message(payload: dict) -> None:
+    route = payload.get("route", "unsupported")
+    label, css_class = _ROUTE_LABELS.get(route, ("Assistant", "route-clarify"))
+    confidence = payload.get("route_confidence", 0)
+    st.markdown(
+        f'<span class="route-badge {css_class}">{label} · {confidence:.0%} confidence</span>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(payload.get("answer", ""))
+
+    sql_detail = payload.get("sql_detail")
+    if sql_detail and sql_detail.get("sql"):
+        with st.expander("🔍 Generated SQL & results"):
+            st.code(sql_detail["sql"], language="sql")
+            if sql_detail.get("explanation"):
+                st.caption(sql_detail["explanation"])
+            if sql_detail.get("rows"):
+                st.dataframe(sql_detail["rows"], use_container_width=True)
+            st.caption(f"{sql_detail.get('row_count', 0)} row(s) · generated by {'LLM' if sql_detail.get('used_llm') else 'rule-based fallback'}")
+
+    rag_detail = payload.get("rag_detail")
+    if rag_detail and rag_detail.get("citations"):
+        with st.expander("📚 Sources"):
+            for c in rag_detail["citations"]:
+                section = f" — Section {c['section_number']}: {c['section_title']}" if c.get("section_number") else ""
+                st.markdown(
+                    f'<span class="citation-chip">📄 {c["document"]}{section} · relevance {c["score"]:.2f}</span>',
+                    unsafe_allow_html=True,
+                )
+
+
+# ---------------------------------------------------------------------------
+# Chat history
+# ---------------------------------------------------------------------------
+st.title("Ask about patients or hospital policy")
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        if msg["role"] == "assistant" and isinstance(msg["content"], dict):
+            render_assistant_message(msg["content"])
+        else:
+            st.markdown(msg["content"])
+
+# ---------------------------------------------------------------------------
+# Input handling
+# ---------------------------------------------------------------------------
+question = st.chat_input("Ask a question about patient data or hospital policy…")
+if "pending_question" in st.session_state:
+    question = st.session_state.pop("pending_question")
+
+if question:
+    st.session_state.messages.append({"role": "user", "content": question})
+    with st.chat_message("user"):
+        st.markdown(question)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Routing and answering…"):
+            try:
+                resp = requests.post(
+                    f"{API_BASE_URL}/api/v1/chat",
+                    json={"message": question, "session_id": st.session_state.session_id},
+                    timeout=60,
+                )
+                if resp.status_code == 200:
+                    payload = resp.json()
+                    render_assistant_message(payload)
+                    st.session_state.messages.append({"role": "assistant", "content": payload})
+                else:
+                    error_text = f"Backend error ({resp.status_code}): {resp.text}"
+                    st.error(error_text)
+                    st.session_state.messages.append({"role": "assistant", "content": error_text})
+            except requests.exceptions.RequestException as exc:
+                error_text = f"Could not reach the backend at {API_BASE_URL}: {exc}"
+                st.error(error_text)
+                st.session_state.messages.append({"role": "assistant", "content": error_text})
